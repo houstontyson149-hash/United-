@@ -1,0 +1,46 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Admin – United</title><link rel="icon" href="img/globe-icon.png"><link rel="stylesheet" href="styles.css"></head><body>
+<header class="top"><a class="brand" href="/"><img src="img/globe-icon.png" alt="">UNITED</a><nav><a href="/">View site</a></nav><div id="user"></div></header>
+<main class="admin" id="app"><p>Loading…</p></main>
+<script>
+const $=id=>document.getElementById(id);
+const api=(m,u,b)=>fetch(u,{method:m,headers:{'Content-Type':'application/json'},body:b?JSON.stringify(b):undefined}).then(async r=>{const j=await r.json().catch(()=>({}));if(!r.ok)throw new Error(j.error||'Request failed');return j});
+const say=(t,ok)=>{$('msg').className='msg '+(ok?'ok':'err');$('msg').textContent=t};
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+let D={};
+async function load(){for(const k of['airports','fleet','routes'])D[k]=await api('GET','/api/'+k);D.admins=await api('GET','/api/admin/admins');render()}
+function render(){
+ const opt=(a,v,l)=>a.map(x=>`<option value="${esc(x[v])}">${esc(l(x))}</option>`).join('');
+ const tbl=(kind,key,cols,rows)=>`<table><tr>${cols.map(c=>`<th>${c[1]}</th>`).join('')}<th></th></tr>${rows.map(r=>`<tr>${cols.map(c=>`<td>${esc(r[c[0]])}</td>`).join('')}<td><button class="btn small danger" data-del="${kind}" data-id="${esc(r[key])}">Delete</button></td></tr>`).join('')}</table>`;
+ $('app').innerHTML=`<div id="msg" class="msg" role="status"></div>
+ <div class="card"><h2>Add a flight route</h2><form class="form" data-post="routes">
+  <div><label>Flight number</label><input name="flightNumber" placeholder="1234" required></div>
+  <div><label>From</label><select name="from">${opt(D.airports,'iata',a=>a.iata+' – '+a.city)}</select></div>
+  <div><label>To</label><select name="to">${opt(D.airports,'iata',a=>a.iata+' – '+a.city)}</select></div>
+  <div><label>Aircraft</label><select name="aircraft">${opt(D.fleet,'id',f=>f.name)}</select></div>
+  <div><label>Departs</label><input name="depart" type="time" required></div><div><label>Arrives</label><input name="arrive" type="time" required></div>
+  <button class="btn">Add route</button></form></div>
+ <div class="card"><h2>Upload routes in bulk</h2><p>One per line: flight number, from, to, aircraft, departs, arrives</p>
+  <textarea id="csv" placeholder="1234,ORD,DEN,B38M,08:15,10:05"></textarea><p><button class="btn" id="imp">Upload routes</button></p></div>
+ <div class="card"><h2>Routes (${D.routes.length})</h2>${tbl('routes','id',[['flightNumber','Flight'],['from','From'],['to','To'],['aircraft','Aircraft'],['depart','Departs'],['arrive','Arrives']],D.routes)}</div>
+ <div class="card"><h2>Airports (${D.airports.length})</h2><form class="form" data-post="airports"><div><label>Code</label><input name="iata" maxlength="3" required></div><div><label>Name</label><input name="name" required></div><div><label>City</label><input name="city"></div><div><label>Country</label><input name="country" maxlength="2" placeholder="US"></div><button class="btn">Add airport</button></form>
+  <details><summary>Show all airports</summary>${tbl('airports','iata',[['iata','Code'],['name','Name'],['city','City'],['country','Country']],D.airports)}</details></div>
+ <div class="card"><h2>Fleet (${D.fleet.length})</h2><form class="form" data-post="fleet"><div><label>Code</label><input name="id" maxlength="6" required></div><div><label>Aircraft</label><input name="name" required></div><div><label>Manufacturer</label><input name="manufacturer"></div><div><label>Seats</label><input name="seats" type="number" min="1" required></div><button class="btn">Add aircraft</button></form>
+  ${tbl('fleet','id',[['id','Code'],['name','Aircraft'],['manufacturer','Maker'],['seats','Seats']],D.fleet)}</div>
+ <div class="card"><h2>Admins</h2><p>Always admin (from .env): ${D.admins.env.map(esc).join(', ')||'none'}</p>
+  <form class="form" id="adm"><div><label>Discord user ID</label><input name="id" inputmode="numeric" required></div><button class="btn">Add admin</button></form>
+  ${tbl('admins','id',[['id','Discord user ID']],D.admins.added.map(id=>({id})))}</div>`;
+}
+document.addEventListener('submit',async e=>{e.preventDefault();const f=e.target;
+ try{if(f.getAttribute('id')==='adm'){await api('POST','/api/admin/admins',{id:new FormData(f).get('id')})}
+ else await api('POST','/api/admin/'+f.dataset.post,Object.fromEntries(new FormData(f)));
+ await load();say('Saved.',1)}catch(x){say(x.message)}});
+document.addEventListener('click',async e=>{const t=e.target;
+ try{if(t.dataset.del){const u=t.dataset.del==='admins'?'/api/admin/admins/':'/api/admin/'+t.dataset.del+'/';await api('DELETE',u+encodeURIComponent(t.dataset.id));await load();say('Deleted.',1)}
+ if(t.id==='imp'){const r=await api('POST','/api/admin/import-routes',{csv:$('csv').value});await load();say(`Added ${r.added} routes.`+(r.bad.length?` Skipped lines: ${r.bad.join(', ')} (check codes and times).`:''),!r.bad.length)}}catch(x){say(x.message)}});
+(async()=>{const me=await api('GET','/api/me');
+ $('user').innerHTML=me?`<div class="user">${me.avatar?`<img src="${me.avatar}" alt="">`:''}${esc(me.name)}<a href="/auth/logout">Sign out</a></div>`:'';
+ if(!me)return $('app').innerHTML='<h1>Admin sign in</h1><p>Sign in with Discord. Access is granted by your Discord user ID.</p><a class="btn" href="/auth/discord?next=admin">Sign in with Discord</a>';
+ if(!me.admin)return $('app').innerHTML='<h1>Not an admin</h1><p>Your Discord account is not on the admin list.</p>';
+ load()})();
+</script></body></html>
